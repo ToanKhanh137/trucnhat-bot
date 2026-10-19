@@ -1,0 +1,4 @@
+# Copy file này thành .dev.vars (không đưa lên git). Dùng khi chạy thử trên máy.
+# Trên Cloudflare thì đặt bằng: npx wrangler secret put BOT_TOKEN / WEBHOOK_SECRET
+BOT_TOKEN=
+WEBHOOK_SECRET=

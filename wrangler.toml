@@ -1,0 +1,27 @@
+name = "trucnhat-bot"
+main = "src/worker.js"
+compatibility_date = "2025-09-01"
+
+# Chạy mỗi phút: nghe tin Zalo ~70 giây + kiểm tra giờ nhắc.
+# Giờ nhắc chỉnh ở MORNING_TIME / REMINDER_TIMES bên dưới (giờ Việt Nam).
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+MORNING_TIME = "07:00"
+REMINDER_TIMES = "20:00,22:00"
+SHAME_STREAK = "2"
+LATE_CONFIRM_UNTIL = "12:00"
+MAX_LEAVE_DAYS = "7"
+SWAP_LIMIT = "2"
+SWAP_WINDOW_DAYS = "7"
+SWAP_TIMEOUT_MINUTES = "120"
+SWAP_COOLDOWN_MINUTES = "30"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "trucnhat"
+database_id = "99ab41e1-5a4b-4012-8411-5a79e56930c7"
+
+[observability]
+enabled = true
