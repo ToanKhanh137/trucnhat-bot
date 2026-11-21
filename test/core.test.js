@@ -320,6 +320,127 @@ describe("Đổi lượt", () => {
   });
 });
 
+describe("Trực thay (/tructhay)", () => {
+  test("tình huống thật: người trực về quê đúng hôm đó, quên /doi, bạn nhận trực thay", () => {
+    const r = new Room();
+    const night = r.advance({ hours: 13 }); // 22:00, Toan vẫn chưa /xong
+    has(night, "Toan vắng thì ai trực thay gõ /tructhay Toan");
+    const out = r.say("Hung", "/tructhay Toan");
+    has(out, "Hung trực thay Toan hôm nay (T2 19/10)");
+    has(out, "Toan trực bù vào lượt của Hung (T4 21/10)");
+    assert.deepEqual(r.schedule(4), ["Hung", "Nam", "Toan", "Tuan"]);
+    has(r.say("Nam", "/lich 4"), "Toan (bù cho Hung)");
+    r.say("Hung", "/xong");
+    r.advance({ days: 1 });
+    assert.equal(r.duty(), "Nam");
+    assert.deepEqual(r.bot.s.missStreak, {}); // Toan không bị tính trốn
+    assert.deepEqual(r.bot.s.swapLog, {}); // không tính vào giới hạn đổi
+  });
+
+  test("lần nhắc đầu buổi tối không chen gợi ý /tructhay", () => {
+    hasNot(new Room().advance({ hours: 11 }), "/tructhay");
+  });
+
+  test("chỉ dùng cho người trực hôm nay", () => {
+    const r = new Room();
+    has(r.say("Hung", "/tructhay Nam"), "Hôm nay là lượt của Toan, không phải Nam");
+    has(r.say("Toan", "/tructhay Toan"), "lượt của bạn mà");
+    has(r.say("Hung", "/tructhay"), "→ /tructhay Toan");
+    r.say("Toan", "/xong");
+    has(r.say("Hung", "/tructhay Toan"), "Toan trực rồi");
+  });
+
+  test("người kia muốn tự trực lại thì /tructhay ngược là về như cũ, không ai nợ ai", () => {
+    const r = new Room();
+    r.say("Hung", "/tructhay Toan");
+    has(r.say("Toan", "/tructhay Hung"), "coi như trả nợ, Hung trực lại vào T4 21/10");
+    assert.deepEqual(r.schedule(4), ["Toan", "Nam", "Hung", "Tuan"]);
+    assert.deepEqual(r.bot.s.debts, {});
+  });
+
+  test("hủy lời nhờ đổi cũ của người vắng", () => {
+    const r = new Room();
+    r.say("Toan", "/doi Nam");
+    r.say("Hung", "/tructhay Toan");
+    has(r.say("Nam", "/dongy"), "Không có ai đang nhờ");
+    assert.equal(r.duty(), "Hung");
+  });
+
+  test("người dọn vệ sinh và người đang nghỉ không trực thay được", () => {
+    const r = new Room();
+    r.say("Toan", "/vesinh Hung, Tuan"); // Tuan dọn vệ sinh vòng này
+    has(r.say("Tuan", "/tructhay Toan"), "dọn vệ sinh");
+    r.say("Toan", "/nghi Nam 19/10 20/10");
+    has(r.say("Nam", "/tructhay Toan"), "lịch nghỉ");
+    assert.equal(r.duty(), "Toan");
+  });
+});
+
+describe("Đẩy xuống cuối vòng (/da)", () => {
+  test("người trực hôm nay vắng: ai cũng đẩy được xuống cuối, người sau lên sớm một lượt", () => {
+    const r = new Room();
+    r.say("Toan", "/thutu Nam"); // Nam, Toan, Hung, Tuan
+    const out = r.say("Hung", "/da Nam");
+    has(out, "Nam bị đẩy xuống cuối vòng này, trực T5 22/10");
+    has(out, "Hôm nay (T2 19/10): Toan trực.");
+    has(out, "Lên sớm một lượt: Toan, Hung, Tuan");
+    assert.deepEqual(r.schedule(4), ["Toan", "Hung", "Tuan", "Nam"]);
+    assert.deepEqual(r.bot.s.debts, {});
+  });
+
+  test("người thường không tự đẩy mình được, admin thì được", () => {
+    const r = new Room();
+    r.say("Toan", "/thutu Nam");
+    has(r.say("Nam", "/da Nam"), "Không tự đẩy mình");
+    assert.equal(r.duty(), "Nam");
+    r.say("Toan", "/xong Nam");
+    r.advance({ days: 1 }); // Toan trực hôm nay
+    has(r.say("Toan", "/da Toan"), "Toan bị đẩy xuống cuối vòng này");
+  });
+
+  test("chưa /toila thì không đẩy được ai", () => {
+    const r = new Room();
+    has(r.bot.handle("u_la", "La", G, "GROUP", "/da Toan", r.now).map(([, t]) => t).join(), "/toila");
+    assert.equal(r.duty(), "Toan");
+  });
+
+  test("có nhóm vệ sinh: chỉ đẩy tới cuối vòng này, không lấn sang vòng sau", () => {
+    const r = new Room(["Toan", "Nam", "Hung", "Tuan", "Long"]);
+    r.say("Toan", "/vesinh Hung, Tuan"); // Tuan dọn vệ sinh, vòng trực phòng: Toan Nam Hung Long
+    r.doDay();
+    r.doDay(); // Toan, Nam đã trực vòng này; còn Hung, Long
+    assert.equal(r.duty(), "Hung");
+    has(r.say("Toan", "/da Hung"), "Hôm nay (T4 21/10): Long trực.");
+    // Hung trực cuối vòng rồi mới tới lượt dọn vệ sinh, không bị đẩy qua vòng sau
+    assert.deepEqual(r.schedule(3), ["Long", "Hung", "Tuan"]);
+    const lastOne = r.say("Toan", "/da Hung");
+    has(lastOne, "đã là người cuối vòng này rồi");
+    hasNot(lastOne, "/tructhay"); // Hung không trực hôm nay, gợi ý trực thay là sai
+    r.say("Long", "/xong");
+    r.advance({ days: 1 });
+    has(r.say("Toan", "/da Hung"), "Ai làm thay hôm nay thì người đó gõ /tructhay Hung");
+    has(r.say("Toan", "/da Toan"), "Toan trực vòng này rồi");
+    has(r.say("Toan", "/da Tuan"), "đang dọn vệ sinh");
+  });
+
+  test("giữ nợ trực bù", () => {
+    const r = new Room();
+    r.say("Toan", "/doi Hung");
+    r.say("Hung", "/dongy"); // Hung, Nam, Toan (bù cho Hung), Tuan
+    r.say("Toan", "/da Nam");
+    assert.deepEqual(r.schedule(4), ["Hung", "Toan", "Tuan", "Nam"]);
+    has(r.say("Nam", "/lich 2"), "Toan (bù cho Hung)");
+  });
+
+  test("hủy lời nhờ đổi cũ của người bị đẩy (ngày trong lời nhờ không còn đúng)", () => {
+    const r = new Room();
+    r.say("Nam", "/doi Hung"); // nhờ Hung trực thay T3 20/10
+    r.say("Toan", "/da Nam");
+    has(r.say("Hung", "/dongy"), "Không có ai đang nhờ");
+    assert.deepEqual(r.schedule(4), ["Toan", "Hung", "Tuan", "Nam"]);
+  });
+});
+
 describe("Tạm dừng", () => {
   test("lịch đứng yên khi tạm dừng", () => {
     const r = new Room();
@@ -477,6 +598,9 @@ describe("Help", () => {
     const r = new Room();
     has(r.say("Nam", "/help"), "/help doi");
     has(r.say("Nam", "/help admin"), "/thutunuoc");
+    has(r.say("Nam", "/help"), "/da <tên>");
+    has(r.say("Nam", "/help"), "/tructhay <tên>");
+    has(r.say("Nam", "/help trựcthay"), "Vd: /tructhay Long");
     has(r.say("Nam", "/help luat"), "Trốn 2 ngày");
     has(r.say("Nam", "/help doi"), "Vd: /doi Hùng");
     has(r.say("Nam", "/trogiup /đổi"), "Vd: /doi Hùng");

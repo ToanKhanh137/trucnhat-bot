@@ -903,6 +903,72 @@ export class DutyBot {
     this.announce(`${this.name(me)} đã hủy lời nhờ ${names}.`);
   }
 
+  /**
+   * /tructhay <tên>: người trực hôm nay vắng mà chưa kịp /doi thì mình nhận trực thay luôn,
+   * không cần họ /dongy. Như /doi đã chốt: hoán đổi vị trí, người vắng trực bù lượt của mình.
+   * Chỉ áp dụng cho lượt hôm nay để không ai đẩy được lượt tương lai cho người khác.
+   */
+  cmdTructhay(ctx) {
+    const s = this.s;
+    const today = ctx.today;
+    const me = this.requireMember(ctx);
+    if (!me) return;
+    if (this.frozen(today)) {
+      this.say("Đang tạm dừng trực, không cần trực thay đâu 🧊");
+      return;
+    }
+    if (this.doneOn(today)) {
+      this.say(`Hôm nay ${this.name(s.lastDone.member)} trực rồi.`);
+      return;
+    }
+    const td = this.todayDuty(today);
+    if (!td) {
+      this.say("Hôm nay không ai phải trực.");
+      return;
+    }
+    if (!ctx.args) {
+      this.say(`Cú pháp: /tructhay <tên người trực hôm nay>. Hôm nay là lượt của ${this.name(td)} → /tructhay ${this.name(td)}`);
+      return;
+    }
+    const target = this.findOrSay(ctx.args);
+    if (!target) return;
+    if (td === me) {
+      this.say("Hôm nay là lượt của bạn mà 🤨 Xong gõ /xong nhé.");
+      return;
+    }
+    if (target !== td) {
+      this.say(`Hôm nay là lượt của ${this.name(td)}, không phải ${this.name(target)}. /tructhay chỉ dùng cho người trực hôm nay.`);
+      return;
+    }
+    if (s.toilet.current === me) {
+      this.say("Bạn đang dọn vệ sinh vòng này nên không trực phòng thay được.");
+      return;
+    }
+    if (this.onLeave(me, today)) {
+      this.say("Bạn đang trong lịch nghỉ hôm nay. /huynghi trước rồi mới trực thay được.");
+      return;
+    }
+    const q = s.queue;
+    const i = q.indexOf(target);
+    const j = q.indexOf(me);
+    [q[i], q[j]] = [q[j], q[i]];
+    // mình đang nợ đúng người này (họ vừa trực thay mình) thì coi như trả lại, không ai nợ ai
+    const repay = s.debts[me] === target;
+    if (repay) delete s.debts[me];
+    else s.debts[target] = me;
+    // lời nhờ đổi cũ của hai người tính theo lịch cũ, giữ lại sẽ đổi nhầm lượt hôm nay
+    delete s.pendingSwaps[target];
+    delete s.pendingSwaps[me];
+    const back = this.nextTurn(target, today);
+    const when = back ? fmtDay(back) : "lượt tới";
+    this.announce(
+      `🦸 ${this.name(me)} trực thay ${this.name(target)} hôm nay (${fmtDay(today)}). Xong gõ /xong nhé.\n` +
+        (repay
+          ? `${this.name(me)} vốn nợ ${this.name(target)} một lượt nên coi như trả nợ, ${this.name(target)} trực lại vào ${when}.`
+          : `${this.name(target)} trực bù vào lượt của ${this.name(me)} (${when}).`),
+    );
+  }
+
   setCooldown(mid, now) {
     this.s.swapCooldown[mid] = now + this.cfg.swapCooldownMinutes * 60_000;
   }
@@ -1247,6 +1313,64 @@ export class DutyBot {
     this.announce(`📌 ${this.name(mid)} được đưa lên trực kế tiếp` + (d ? ` (${fmtDay(d)}).` : "."));
   }
 
+  /** Những người chưa trực phòng vòng này, theo thứ tự hàng. Không có nhóm vệ sinh thì cả hàng là một vòng. */
+  roundLeft() {
+    const t = this.s.toilet;
+    const room = this.s.queue.filter((m) => m !== t.current);
+    return t.current ? room.slice(0, Math.max(0, room.length - t.progress)) : room;
+  }
+
+  /**
+   * /da <tên>: đẩy người chưa trực vòng này xuống cuối vòng này (không sang vòng sau),
+   * những người đứng sau lên sớm một lượt. Không ai nợ ai.
+   * Ai cũng dùng được, nhưng người thường không tự đẩy mình (thế là lách giới hạn /doi).
+   */
+  cmdDa(ctx) {
+    const admin = this.isAdmin(ctx.senderId);
+    const me = this.memberOf(ctx.senderId);
+    if (!admin && !this.requireMember(ctx)) return;
+    if (!ctx.args) {
+      this.say("Cú pháp: /da <tên>");
+      return;
+    }
+    const mid = this.findOrSay(ctx.args);
+    if (!mid) return;
+    if (mid === me && !admin) {
+      this.say("Không tự đẩy mình được 😏 Bận thì /doi với ai đó.");
+      return;
+    }
+    const s = this.s;
+    const today = ctx.today;
+    const name = this.name(mid);
+    if (mid === s.toilet.current) {
+      this.say(`${name} đang dọn vệ sinh vòng này, không có lượt trực phòng để đẩy.`);
+      return;
+    }
+    const left = this.roundLeft();
+    if (!left.includes(mid)) {
+      this.say(`${name} trực vòng này rồi.`);
+      return;
+    }
+    const last = left.at(-1);
+    const before = this.todayDuty(today);
+    if (last === mid) {
+      const hint = mid === before ? ` Ai làm thay hôm nay thì người đó gõ /tructhay ${name}.` : "";
+      this.say(`${name} đã là người cuối vòng này rồi.${hint}`);
+      return;
+    }
+    const moved = left.slice(left.indexOf(mid) + 1);
+    const q = s.queue;
+    q.splice(q.indexOf(mid), 1);
+    q.splice(q.indexOf(last) + 1, 0, mid);
+    delete s.pendingSwaps[mid]; // lời nhờ đổi tính theo lượt cũ, không còn đúng
+    const d = this.nextTurn(mid, today);
+    const td = this.todayDuty(today);
+    let text = `👢 ${name} bị đẩy xuống cuối vòng này` + (d ? `, trực ${fmtDay(d)}.` : ".");
+    if (td && td !== before) text += `\nHôm nay (${fmtDay(today)}): ${this.name(td)} trực.`;
+    text += `\n⏩ Lên sớm một lượt: ${moved.map((m) => this.name(m)).join(", ")} (xem /lich)`;
+    this.announce(text);
+  }
+
   cmdHuylk(ctx) {
     if (!this.requireAdmin(ctx)) return;
     const mid = this.findOrSay(ctx.args);
@@ -1310,7 +1434,14 @@ export class DutyBot {
         if (!sentMorning && !this.frozen(today)) {
           const lines = [];
           const td = this.todayDuty(today);
-          if (td) lines.push(fill(this.choice(REMINDER), { name: this.name(td) }));
+          if (td) {
+            const name = this.name(td);
+            lines.push(fill(this.choice(REMINDER), { name }));
+            // lần nhắc cuối ngày: người trực có thể đang vắng, chỉ cho người khác cách nhận thay
+            if (passed.length === this.cfg.reminderTimes.length) {
+              lines.push(`(${name} vắng thì ai trực thay gõ /tructhay ${name})`);
+            }
+          }
           const wn = this.waterNext(today);
           if (s.water.emptySince && wn) lines.push(`🚱 Vẫn đang hết nước, @${this.name(wn)} ơi đi lấy đi (xong gõ /lay).`);
           if (lines.length) out.push([group, lines.join("\n")]);
@@ -1401,6 +1532,8 @@ Trong nhóm phải @bot trước lệnh, vd: @Bot Trực Nhật /xong
 /doi <tên>: nhờ người trực thay, sau trực bù
 /dongy · /tuchoi: trả lời lời nhờ
 /huydoi: rút lại lời nhờ
+/tructhay <tên>: người trực hôm nay vắng thì mình trực thay
+/da <tên>: đẩy người vắng xuống cuối vòng này
 
 🚽 /vesinh: ai dọn vệ sinh vòng này · /xongvs: báo đã dọn
 💧 /hetnuoc: báo hết nước · /lay: báo đã lấy · /huylay: gõ nhầm thì hủy
@@ -1434,6 +1567,7 @@ export const HELP_RULES = `📜 LUẬT PHÒNG
 • Trốn {shame} ngày liền → bị bêu tên trước cả phòng 😈
 • Đổi lượt: người được nhờ phải /dongy, người nhờ trực bù lượt của họ
 • Tối đa {lim} lần đổi / {win} ngày. Đang trực bù thì không được đổi tiếp
+• Người trực hôm nay vắng mà chưa /doi: ai trực thay thì gõ /tructhay <tên>, người vắng trực bù lượt của họ
 • Nghỉ tối đa {max} ngày, không phải bù, về là được xếp trực trước
 • Không được xin nghỉ đúng ngày mình đang tới lượt
 • Nhóm vệ sinh n người: mỗi vòng 1 người dọn vệ sinh, n-1 người trực phòng. Hết vòng đổi người
@@ -1460,6 +1594,13 @@ export const HELP_DETAIL = {
   dongy: "/dongy [tên]\nĐồng ý lời nhờ trực phòng hoặc lấy nước. Nếu nhiều người cùng nhờ thì ghi tên.\nVd: /dongy Nam",
   tuchoi: "/tuchoi [tên]\nTừ chối lời nhờ. Nhiều người nhờ thì ghi tên.",
   huydoi: "/huydoi\nRút lại lời nhờ đổi mình vừa gửi (đợi {cooldown} phút mới nhờ lại được).",
+  tructhay:
+    "/tructhay <tên>\nNgười trực hôm nay vắng mà chưa kịp /doi thì bạn nhận trực thay luôn, không cần họ /dongy. " +
+    "Họ trực bù vào lượt của bạn.\n" +
+    "• Chỉ dùng cho người trực hôm nay\n" +
+    "• Trực xong vẫn phải gõ /xong\n" +
+    "• Không tính vào giới hạn đổi lượt\n" +
+    "• Trong ngày, người kia muốn tự trực lại thì gõ /tructhay <tên bạn> là trả lại như cũ\nVd: /tructhay Long",
   vesinh:
     "/vesinh\nXem nhóm vệ sinh và ai dọn vòng này.\n" +
     "Admin: /vesinh A, B để đặt nhóm (mỗi vòng 1 người dọn vệ sinh, những người còn lại trực phòng). /vesinh tat để bỏ.",
@@ -1492,6 +1633,11 @@ export const HELP_DETAIL = {
   thutu: "/thutu A B C (admin)\nSắp lại thứ tự trực phòng. Người không ghi tên giữ thứ tự cũ, xếp phía sau.",
   thutunuoc: "/thutunuoc A B C (admin)\nSắp lại thứ tự lấy nước.",
   datlai: "/datlai <tên> (admin)\nĐưa người này lên đầu vòng, trực lượt kế tiếp.",
+  da:
+    "/da <tên>\nĐẩy người chưa trực vòng này xuống cuối vòng này, những người đứng sau lên sớm một lượt. " +
+    "Không ai nợ ai. Chỉ trong vòng này, không đẩy sang vòng sau.\n" +
+    "Không tự đẩy mình được (bận thì /doi). Đẩy người trực hôm nay thì người kế phải trực luôn hôm nay.\n" +
+    "Không có nhóm vệ sinh thì cả hàng tính là một vòng.\nVd: /da Long (Long vắng hôm nay, để Long trực cuối vòng)",
   tamdung:
     "/tamdung <đến ngày> (admin)\nCả phòng tạm dừng trực (lễ, Tết): lịch đứng yên, không nhắc, không tính trốn.\n" +
     "Vd: /tamdung 26/10 (từ hôm nay đến hết 26/10) · /tamdung 20/10 26/10 (đặt trước)",
@@ -1513,6 +1659,7 @@ export const COMMANDS = {
   dongy: "cmdDongy",
   tuchoi: "cmdTuchoi",
   huydoi: "cmdHuydoi",
+  tructhay: "cmdTructhay",
   vesinh: "cmdVesinh", wc: "cmdVesinh",
   xongvs: "cmdXongvs", xongwc: "cmdXongvs",
   tamdung: "cmdTamdung", freeze: "cmdTamdung",
@@ -1529,6 +1676,7 @@ export const COMMANDS = {
   xoa: "cmdXoa",
   thutu: "cmdThutu",
   datlai: "cmdDatlai",
+  da: "cmdDa",
   huylk: "cmdHuylk",
   admin: "cmdAdmin",
 };

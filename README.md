@@ -91,6 +91,8 @@ Một phòng KTX dùng chưa tới 5% hạn mức.
 | `/xong` | Người trực hôm nay xuống cuối vòng, mai đến người kế tiếp |
 | Không `/xong` trước 0h | Hôm sau vẫn người đó. Trốn 2 ngày liền thì bị bêu tên trước cả nhóm kèm joke |
 | `/doi Hùng` → Hùng `/dongy` | Hùng trực thay lượt tới của bạn, bạn trực bù vào lượt của Hùng |
+| `/tructhay Long` | Long trực hôm nay mà vắng, chưa kịp `/doi`: bạn nhận trực thay luôn (không cần Long trả lời), Long trực bù lượt của bạn. Chỉ dùng cho người trực hôm nay. Lần nhắc 22h tự gợi ý lệnh này |
+| `/da Long` | Ai cũng gõ được: đẩy Long xuống cuối vòng này (không sang vòng sau), những người sau lên sớm một lượt, không ai nợ ai. Không tự đẩy mình được (trừ admin) |
 | Chống spam đổi | Tối đa 2 lần / 7 ngày · đang trực bù thì không đổi tiếp · bị từ chối/hủy phải đợi 30 phút · lời nhờ hết hạn sau 2 giờ · chỉ nhờ được người trực *sau* mình |
 | `/nghi 20/10 26/10` | Tối đa 7 ngày (admin không giới hạn). Không phải bù, lịch tự dồn cho người khác. Về là được trực trước. Không được xin nghỉ đúng ngày mình tới lượt |
 | `/tamdung 26/10` (admin) | Cả phòng nghỉ (lễ, Tết) đến hết 26/10: lịch đứng yên, không nhắc, không tính trốn. `/tieptuc` để hủy |
