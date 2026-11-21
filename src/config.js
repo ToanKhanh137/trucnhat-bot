@@ -3,6 +3,7 @@ export const DEFAULT_CONFIG = {
   reminderTimes: ["20:00", "22:00"], // nhắc nếu chưa /xong
   shameStreak: 2,                    // trốn bao nhiêu ngày liền thì bị bêu tên
   lateConfirmUntil: "12:00",         // quên /xong thì được /xong homqua đến giờ này hôm sau
+  undoMinutes: 30,                   // gõ nhầm /lay thì được /huylay trong bấy nhiêu phút
   maxLeaveDays: 7,                   // số ngày nghỉ tối đa tự xin (admin không giới hạn)
   swapLimit: 2,                      // số lần đổi tối đa ...
   swapWindowDays: 7,                 // ... trong bấy nhiêu ngày
@@ -15,6 +16,7 @@ const ENV_KEYS = {
   REMINDER_TIMES: "reminderTimes",
   SHAME_STREAK: "shameStreak",
   LATE_CONFIRM_UNTIL: "lateConfirmUntil",
+  UNDO_MINUTES: "undoMinutes",
   MAX_LEAVE_DAYS: "maxLeaveDays",
   SWAP_LIMIT: "swapLimit",
   SWAP_WINDOW_DAYS: "swapWindowDays",

@@ -353,7 +353,7 @@ export class DutyBot {
     const c = this.cfg;
     const values = {
       max: c.maxLeaveDays, shame: c.shameStreak, lim: c.swapLimit, win: c.swapWindowDays,
-      timeout: humanMinutes(c.swapTimeoutMinutes), cooldown: c.swapCooldownMinutes, late: c.lateConfirmUntil,
+      timeout: humanMinutes(c.swapTimeoutMinutes), cooldown: c.swapCooldownMinutes, late: c.lateConfirmUntil, undo: c.undoMinutes,
     };
     const topic = ctx.args ? norm(ctx.args).replace(/^\/+/, "").split(" ")[0] : "";
     let text;
@@ -966,22 +966,71 @@ export class DutyBot {
 
   cmdLay(ctx) {
     const w = this.s.water;
-    const me = this.requireMember(ctx);
-    if (!me) return;
+    let who;
+    if (ctx.args) {
+      if (!this.requireAdmin(ctx)) return;
+      who = this.findOrSay(ctx.args);
+    } else {
+      who = this.requireMember(ctx);
+    }
+    if (!who) return;
     const nxt = this.waterNext(ctx.today);
-    if (w.queue.includes(me)) w.queue.splice(w.queue.indexOf(me), 1);
-    w.queue.push(me);
+    // lưu lại để /huylay khôi phục nếu gõ nhầm
+    w.undo = {
+      by: ctx.senderId, member: who, at: ctx.now,
+      queue: [...w.queue], debts: { ...w.debts }, emptySince: w.emptySince, last: w.last,
+    };
+    if (w.queue.includes(who)) w.queue.splice(w.queue.indexOf(who), 1);
+    w.queue.push(who);
     w.emptySince = null;
-    w.last = { date: ctx.today, member: me };
-    delete w.pending[me];
-    const owed = w.debts[me];
-    delete w.debts[me];
-    let text = `💧 Cảm ơn ${this.name(me)} đã lấy nước!`;
+    w.last = { date: ctx.today, member: who };
+    delete w.pending[who];
+    const owed = w.debts[who];
+    delete w.debts[who];
+    let text = `💧 Cảm ơn ${this.name(who)} đã lấy nước!`;
+    if (this.memberOf(ctx.senderId) !== who) text += " (admin xác nhận hộ)";
     if (owed) text += ` (đã lấy bù cho ${this.name(owed)}, hết nợ)`;
-    else if (nxt && me !== nxt) text += ` Lấy sớm hơn lượt nên ${this.name(nxt)} vẫn là lượt kế.`;
+    else if (nxt && who !== nxt) text += ` Lấy sớm hơn lượt nên ${this.name(nxt)} vẫn là lượt kế.`;
     const after = this.waterNext(ctx.today);
     if (after) text += `\nLần sau: ${this.name(after)}`;
+    text += `\n(Gõ nhầm thì /huylay trong ${this.cfg.undoMinutes} phút)`;
     this.announce(text);
+  }
+
+  /** /huylay: hủy lần /lay gần nhất (người vừa gõ hoặc admin, trong undoMinutes phút). */
+  cmdHuylay(ctx) {
+    const w = this.s.water;
+    const u = w.undo;
+    if (!u) {
+      this.say("Không có lần /lay nào để hủy.");
+      return;
+    }
+    if (u.by !== ctx.senderId && !this.isAdmin(ctx.senderId)) {
+      this.say("Chỉ người vừa gõ /lay hoặc admin mới hủy được.");
+      return;
+    }
+    if (ctx.now - u.at > this.cfg.undoMinutes * 60_000) {
+      this.say(`Quá ${this.cfg.undoMinutes} phút rồi, không hủy được nữa. Admin dùng /thutunuoc để sắp lại.`);
+      return;
+    }
+    // hàng đã thêm/bớt người kể từ lúc đó thì không khôi phục mù được
+    const same = u.queue.length === w.queue.length && u.queue.every((m) => w.queue.includes(m));
+    if (!same) {
+      delete w.undo;
+      this.say("Danh sách đã thay đổi từ lúc đó, không hủy được. Admin dùng /thutunuoc để sắp lại.");
+      return;
+    }
+    w.queue = u.queue;
+    w.debts = u.debts;
+    w.last = u.last;
+    w.emptySince = w.emptySince || u.emptySince;
+    delete w.undo;
+    const nxt = this.waterNext(ctx.today);
+    this.announce(
+      `↩️ Đã hủy lần /lay của ${this.name(u.member)}, thứ tự lấy nước trở lại như trước.` +
+        (nxt ? `\nLượt kế: ${this.name(nxt)}` : "") +
+        (w.emptySince ? " (đang hết nước!)" : ""),
+    );
   }
 
   cmdDoinuoc(ctx) {
@@ -1029,6 +1078,7 @@ export class DutyBot {
   acceptWater(r, me) {
     const w = this.s.water;
     delete w.pending[r];
+    delete w.undo; // thứ tự vừa đổi, không còn khôi phục được lần /lay trước
     const q = w.queue;
     const i = q.indexOf(r);
     const j = q.indexOf(me);
@@ -1054,6 +1104,7 @@ export class DutyBot {
     }
     const w = this.s.water;
     w.queue = [...picked, ...w.queue.filter((m) => !picked.includes(m))];
+    delete w.undo; // admin đã sắp tay, /huylay không được ghi đè lại
     this.cmdNuoc(ctx);
   }
 
@@ -1352,7 +1403,7 @@ Trong nhóm phải @bot trước lệnh, vd: @Bot Trực Nhật /xong
 /huydoi: rút lại lời nhờ
 
 🚽 /vesinh: ai dọn vệ sinh vòng này · /xongvs: báo đã dọn
-💧 /hetnuoc: báo hết nước · /lay: báo đã lấy
+💧 /hetnuoc: báo hết nước · /lay: báo đã lấy · /huylay: gõ nhầm thì hủy
    /doinuoc <tên>: nhờ đi lấy thay · /nuoc: thứ tự lấy nước
 🏖 /nghi <từ> <đến>: xin nghỉ · /huynghi: hủy nghỉ
 👤 /toila <tên>: liên kết Zalo · /id: xem ID
@@ -1365,6 +1416,7 @@ export const HELP_ADMIN = `👑 LỆNH ADMIN
 /xoa <tên>: xóa người
 /thutu A B C: sắp lại thứ tự trực phòng
 /thutunuoc A B C: sắp lại thứ tự lấy nước
+/lay <tên>: xác nhận lấy nước hộ
 /datlai <tên>: cho người này trực kế tiếp
 /xong <tên>: xác nhận trực hộ
 /nghi <tên> <từ> <đến>: cho nghỉ, không giới hạn ngày
@@ -1413,7 +1465,13 @@ export const HELP_DETAIL = {
     "Admin: /vesinh A, B để đặt nhóm (mỗi vòng 1 người dọn vệ sinh, những người còn lại trực phòng). /vesinh tat để bỏ.",
   xongvs: "/xongvs\nNgười dọn vệ sinh vòng này báo đã dọn xong. Lúc nào trong vòng cũng được.",
   hetnuoc: "/hetnuoc\nBáo hết nước. Bot gọi người tới lượt và nhắc mãi đến khi có người /lay.",
-  lay: "/lay\nBáo đã lấy nước. Mình xuống cuối hàng.\nLấy hộ khi chưa tới lượt thì người tới lượt vẫn giữ lượt.",
+  lay:
+    "/lay\nBáo đã lấy nước. Mình xuống cuối hàng.\nLấy hộ khi chưa tới lượt thì người tới lượt vẫn giữ lượt.\n" +
+    "Lưu ý: /lay luôn tính cho người gõ. Bạn khác lấy mà quên báo thì nhờ admin gõ /lay <tên>.\n" +
+    "Gõ nhầm: /huylay trong {undo} phút.",
+  huylay:
+    "/huylay\nHủy lần /lay gần nhất, thứ tự lấy nước trở lại như trước. " +
+    "Chỉ người vừa gõ /lay hoặc admin, trong {undo} phút.",
   doinuoc:
     "/doinuoc <tên>\nĐang tới lượt mà không đi được thì nhờ người khác đi thay. Người kia /dongy, " +
     "bạn lấy bù vào lượt của họ.\nVd: /doinuoc Long",
@@ -1462,6 +1520,7 @@ export const COMMANDS = {
   nuoc: "cmdNuoc",
   hetnuoc: "cmdHetnuoc",
   lay: "cmdLay", laynuoc: "cmdLay",
+  huylay: "cmdHuylay",
   doinuoc: "cmdDoinuoc",
   thutunuoc: "cmdThutunuoc",
   nghi: "cmdNghi",

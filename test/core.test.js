@@ -411,6 +411,59 @@ describe("Lấy nước", () => {
     has(r.say("Toan", "/lay"), "lấy bù cho Hung");
   });
 
+  test("admin /lay <tên> xác nhận hộ, người thường thì không", () => {
+    const r = new Room();
+    has(r.say("Nam", "/lay Hung"), "chỉ admin");
+    has(r.say("Toan", "/lay Hung"), "Cảm ơn Hung đã lấy nước! (admin xác nhận hộ)");
+    assert.deepEqual(r.bot.s.water.queue.map((m) => r.bot.name(m)), ["Toan", "Nam", "Tuan", "Hung"]);
+  });
+
+  test("tình huống thật: gõ nhầm /lay thay vì gõ hộ, /huylay rồi /lay <tên>", () => {
+    const r = new Room();
+    r.say("Toan", "/thutunuoc Nam Hung Toan Tuan"); // Nam đang tới lượt
+    r.say("Hung", "/hetnuoc");
+    r.say("Toan", "/lay"); // Nam đi lấy, Toan định gõ hộ nhưng gõ nhầm
+    assert.deepEqual(r.bot.s.water.queue.map((m) => r.bot.name(m)), ["Nam", "Hung", "Tuan", "Toan"]);
+    const out = r.say("Toan", "/huylay");
+    has(out, "Đã hủy lần /lay của Toan");
+    has(out, "Lượt kế: Nam (đang hết nước!)");
+    assert.deepEqual(r.bot.s.water.queue.map((m) => r.bot.name(m)), ["Nam", "Hung", "Toan", "Tuan"]);
+    r.say("Toan", "/lay Nam");
+    assert.deepEqual(r.bot.s.water.queue.map((m) => r.bot.name(m)), ["Hung", "Toan", "Tuan", "Nam"]);
+    assert.equal(r.bot.s.water.emptySince, null);
+  });
+
+  test("/huylay khôi phục cả nợ lấy bù", () => {
+    const r = new Room();
+    r.say("Toan", "/doinuoc Hung");
+    r.say("Hung", "/dongy");
+    r.say("Hung", "/lay");
+    r.say("Nam", "/lay");
+    r.say("Toan", "/lay"); // Toan lấy bù cho Hung → hết nợ
+    assert.deepEqual(r.bot.s.water.debts, {});
+    r.say("Toan", "/huylay");
+    assert.deepEqual(r.bot.s.water.debts, { m1: "m3" });
+  });
+
+  test("/huylay: chỉ người gõ hoặc admin, một lần, trong 30 phút", () => {
+    const r = new Room();
+    r.say("Nam", "/lay");
+    has(r.say("Hung", "/huylay"), "Chỉ người vừa gõ /lay hoặc admin");
+    r.now += 31 * MIN;
+    has(r.say("Nam", "/huylay"), "Quá 30 phút");
+    r.now -= 31 * MIN;
+    has(r.say("Toan", "/huylay"), "Đã hủy"); // admin hủy được
+    has(r.say("Toan", "/huylay"), "Không có lần /lay nào");
+  });
+
+  test("sắp tay bằng /thutunuoc thì /huylay không ghi đè", () => {
+    const r = new Room();
+    r.say("Nam", "/lay");
+    r.say("Toan", "/thutunuoc Tuan");
+    has(r.say("Nam", "/huylay"), "Không có lần /lay nào");
+    assert.equal(r.bot.name(r.bot.s.water.queue[0]), "Tuan");
+  });
+
   test("nhắc hết nước buổi tối và buổi sáng", () => {
     const r = new Room();
     r.say("Nam", "/hetnuoc");
